@@ -20,7 +20,7 @@ TOKEN = os.environ.get("TELEGRAM_TOKEN", "8386637281:AAHB06Ex-vLau4dqU2znuBo3EWp
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 ATTESA_FOTO, CONFERMA_RESET = range(2)
 
-# --- FUNZIONI DI GESTIONE FILE ---
+# --- FUNZIONI DI GESTIONE FILE (invariate) ---
 def carica_utenti():
     try:
         with open('utenti.json', 'r') as f: return json.load(f)
@@ -43,7 +43,8 @@ def carica_dati():
 def salva_dati(dati):
     with open('dati.json', 'w') as f: json.dump(dati, f, indent=4)
 
-# --- COMANDI DI AMMINISTRAZIONE ---
+# --- TUTTE LE FUNZIONI DEI COMANDI (adduser, deluser, reset, partita, classifica, etc.) ---
+# (Queste funzioni sono corrette e rimangono identiche)
 async def listusers(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     utenti = carica_utenti()
     messaggio = "👤 *Lista Utenti Registrati:*\n\n" + "\n".join(f"- `{nome}`" for nome in utenti)
@@ -78,18 +79,15 @@ async def reset_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     return CONFERMA_RESET
 
 async def reset_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    query = update.callback_query
-    await query.answer()
+    query = update.callback_query; await query.answer()
     utenti = carica_utenti()
     statistiche = {n: {"vittorie": 0, "sconfitte": 0, "pareggi": 0, "gol_fatti": 0, "gol_subiti": 0, "partite_giocate": 0, "punti": 0} for n in utenti}
     salva_dati({"statistiche": statistiche})
-    await query.edit_message_text(" resettato con successo.")
-    return ConversationHandler.END
+    await query.edit_message_text(" resettato con successo."); return ConversationHandler.END
 
 async def reset_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query; await query.answer(); await query.edit_message_text("Operazione annullata."); return ConversationHandler.END
 
-# --- COMANDI UTENTE ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text('Ciao! Sono il bot per le amichevoli. Usa /partita o /classifica.')
 
@@ -134,8 +132,7 @@ async def classifica_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 async def gestisci_pulsanti_classifica(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query; await query.answer()
-    tipo_classifica = query.data
-    dati = carica_dati(); utenti_attivi = carica_utenti()
+    tipo_classifica = query.data; dati = carica_dati(); utenti_attivi = carica_utenti()
     statistiche_filtrate = {utente: dati["statistiche"][utente] for utente in utenti_attivi if utente in dati["statistiche"]}
     classifica_ordinata = sorted(statistiche_filtrate.items(), key=lambda item: item[1][tipo_classifica], reverse=True)
     nome_classifica_ita = tipo_classifica.replace('_', ' ').title()
@@ -146,55 +143,42 @@ async def gestisci_pulsanti_classifica(update: Update, context: ContextTypes.DEF
             testo_risposta += f"*{i}. {player}:* {stats[tipo_classifica]}\n"
     await query.edit_message_text(text=testo_risposta, parse_mode='Markdown')
 
-# --- PARTE WEBHOOK (FLASK) ---
+# --- NUOVA STRUTTURA DI AVVIO ---
+
+# 1. Inizializza l'applicazione del bot e l'app web Flask
 application = Application.builder().token(TOKEN).build()
 app = Flask(__name__)
 
+# 2. Registra tutti i gestori di comandi (handlers)
+conv_partita = ConversationHandler(entry_points=[CommandHandler('partita', partita_start)], states={ATTESA_FOTO: [MessageHandler(filters.PHOTO, ricevi_foto)]}, fallbacks=[CommandHandler('annulla', annulla)])
+conv_reset = ConversationHandler(entry_points=[CommandHandler('reset', reset_start)], states={CONFERMA_RESET: [CallbackQueryHandler(reset_confirm, pattern='^reset_confirm$'), CallbackQueryHandler(reset_cancel, pattern='^reset_cancel$')]}, fallbacks=[CommandHandler('annulla', reset_cancel)])
+application.add_handler(conv_partita)
+application.add_handler(conv_reset)
+application.add_handler(CommandHandler("start", start))
+application.add_handler(CommandHandler("classifica", classifica_menu))
+application.add_handler(CommandHandler("adduser", adduser))
+application.add_handler(CommandHandler("deluser", deluser))
+application.add_handler(CommandHandler("listusers", listusers))
+application.add_handler(CallbackQueryHandler(gestisci_pulsanti_classifica))
+
+# 3. Esegui la configurazione asincrona UNA SOLA VOLTA all'avvio
+# Questo blocco ora viene eseguito quando Gunicorn importa il file.
+async def setup():
+    await application.initialize()
+    if WEBHOOK_URL:
+        await application.bot.set_webhook(url=f"{WEBHOOK_URL}/{TOKEN}")
+        logging.info(f"Webhook impostato su {WEBHOOK_URL}")
+
+# Eseguiamo la funzione di setup
+asyncio.run(setup())
+
+# 4. Definisci le rotte web per Flask
 @app.route("/")
 def index():
     return "Bot is running!"
 
 @app.route(f"/{TOKEN}", methods=["POST"])
 async def webhook():
-    update_data = request.get_json()
-    update = Update.de_json(update_data, application.bot)
+    update = Update.de_json(request.get_json(), application.bot)
     await application.process_update(update)
     return {"ok": True}
-
-async def setup_bot():
-    """Imposta il bot, i gestori e il webhook."""
-    await application.initialize()  # <-- LA RIGA CHIAVE CHE MANCAVA
-
-    conv_partita = ConversationHandler(
-        entry_points=[CommandHandler('partita', partita_start)],
-        states={ATTESA_FOTO: [MessageHandler(filters.PHOTO, ricevi_foto)]},
-        fallbacks=[CommandHandler('annulla', annulla)]
-    )
-    conv_reset = ConversationHandler(
-        entry_points=[CommandHandler('reset', reset_start)],
-        states={CONFERMA_RESET: [
-            CallbackQueryHandler(reset_confirm, pattern='^reset_confirm$'),
-            CallbackQueryHandler(reset_cancel, pattern='^reset_cancel$')
-        ]},
-        fallbacks=[CommandHandler('annulla', reset_cancel)]
-    )
-    
-    application.add_handler(conv_partita)
-    application.add_handler(conv_reset)
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("classifica", classifica_menu))
-    application.add_handler(CommandHandler("adduser", adduser))
-    application.add_handler(CommandHandler("deluser", deluser))
-    application.add_handler(CommandHandler("listusers", listusers))
-    application.add_handler(CallbackQueryHandler(gestisci_pulsanti_classifica))
-    
-    if WEBHOOK_URL:
-        await application.bot.set_webhook(url=f"{WEBHOOK_URL}/{TOKEN}")
-        logging.info(f"Webhook impostato su {WEBHOOK_URL}")
-    else:
-        logging.warning("WEBHOOK_URL non impostato, il bot potrebbe non funzionare online.")
-
-if __name__ == "__main__":
-    asyncio.run(setup_bot())
-    port = int(os.environ.get("PORT", 8000))
-    app.run(host="0.0.0.0", port=port)
