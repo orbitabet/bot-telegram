@@ -1,7 +1,6 @@
-# bot.py - Versione Finale, Corretta e Semplificata
+# bot.py - Versione Finale Definitiva
 import logging
 import json
-import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
@@ -141,13 +140,24 @@ async def gestisci_pulsanti_classifica(update: Update, context: ContextTypes.DEF
     await query.edit_message_text(text=testo_risposta, parse_mode='Markdown')
 
 # --- FUNZIONE PRINCIPALE (Semplificata e Corretta) ---
-async def main() -> None:
-    """Avvia il bot e lo tiene in esecuzione."""
+def main() -> None:
+    """Avvia il bot in modalità polling."""
     application = Application.builder().token(TOKEN).build()
 
     # Registra tutti i gestori (handlers)
-    conv_partita = ConversationHandler(entry_points=[CommandHandler('partita', partita_start)], states={ATTESA_FOTO: [MessageHandler(filters.PHOTO, ricevi_foto)]}, fallbacks=[CommandHandler('annulla', annulla)])
-    conv_reset = ConversationHandler(entry_points=[CommandHandler('reset', reset_start)], states={CONFERMA_RESET: [CallbackQueryHandler(reset_confirm, pattern='^reset_confirm$'), CallbackQueryHandler(reset_cancel, pattern='^reset_cancel$')]}, fallbacks=[CommandHandler('annulla', reset_cancel)])
+    conv_partita = ConversationHandler(
+        entry_points=[CommandHandler('partita', partita_start)],
+        states={ATTESA_FOTO: [MessageHandler(filters.PHOTO, ricevi_foto)]},
+        fallbacks=[CommandHandler('annulla', annulla)],
+    )
+    conv_reset = ConversationHandler(
+        entry_points=[CommandHandler('reset', reset_start)],
+        states={CONFERMA_RESET: [
+            CallbackQueryHandler(reset_confirm, pattern='^reset_confirm$'),
+            CallbackQueryHandler(reset_cancel, pattern='^reset_cancel$'),
+        ]},
+        fallbacks=[CommandHandler('annulla', reset_cancel)],
+    )
     application.add_handler(conv_partita)
     application.add_handler(conv_reset)
     application.add_handler(CommandHandler("start", start))
@@ -157,10 +167,10 @@ async def main() -> None:
     application.add_handler(CommandHandler("listusers", listusers))
     application.add_handler(CallbackQueryHandler(gestisci_pulsanti_classifica))
 
-    logging.info("Bot avviato correttamente. In ascolto...")
+    logging.info("Bot avviato. In ascolto...")
     
-    # Questo singolo comando avvia il bot in modalità polling e lo tiene attivo
-    await application.run_polling()
+    # Questo singolo comando avvia il bot e gestisce tutto internamente.
+    application.run_polling()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
