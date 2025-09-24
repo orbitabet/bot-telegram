@@ -1,4 +1,4 @@
-# bot.py - Versione Polling con avvio ASINCRONO ROBUSTO
+# bot.py - Versione Finale, Corretta e Semplificata
 import logging
 import json
 import asyncio
@@ -20,7 +20,6 @@ ATTESA_FOTO, CONFERMA_RESET = range(2)
 
 # --- FUNZIONI DI GESTIONE FILE ---
 def carica_utenti():
-    """Carica la lista di utenti dal file utenti.json."""
     try:
         with open('utenti.json', 'r') as f: return json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
@@ -29,11 +28,9 @@ def carica_utenti():
         return utenti_iniziali
 
 def salva_utenti(utenti):
-    """Salva la lista utenti nel file utenti.json."""
     with open('utenti.json', 'w') as f: json.dump(sorted(utenti), f, indent=4)
 
 def carica_dati():
-    """Carica i dati dal file dati.json. Se non esiste, lo crea basandosi sugli utenti."""
     try:
         with open('dati.json', 'r') as f: return json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
@@ -42,7 +39,6 @@ def carica_dati():
         return {"statistiche": statistiche}
 
 def salva_dati(dati):
-    """Salva i dati nel file dati.json."""
     with open('dati.json', 'w') as f: json.dump(dati, f, indent=4)
 
 # --- FUNZIONI DEI COMANDI ---
@@ -144,9 +140,9 @@ async def gestisci_pulsanti_classifica(update: Update, context: ContextTypes.DEF
             testo_risposta += f"*{i}. {player}:* {stats[tipo_classifica]}\n"
     await query.edit_message_text(text=testo_risposta, parse_mode='Markdown')
 
-# --- NUOVA FUNZIONE PRINCIPALE (ASINCRONA E ROBUSTA) ---
+# --- FUNZIONE PRINCIPALE (Semplificata e Corretta) ---
 async def main() -> None:
-    """Avvia il bot in modalità polling usando asyncio."""
+    """Avvia il bot e lo tiene in esecuzione."""
     application = Application.builder().token(TOKEN).build()
 
     # Registra tutti i gestori (handlers)
@@ -160,27 +156,11 @@ async def main() -> None:
     application.add_handler(CommandHandler("deluser", deluser))
     application.add_handler(CommandHandler("listusers", listusers))
     application.add_handler(CallbackQueryHandler(gestisci_pulsanti_classifica))
+
+    logging.info("Bot avviato correttamente. In ascolto...")
     
-    logging.info("Bot in fase di avvio...")
-    
-    # Comandi di avvio asincrono (più robusti)
-    try:
-        await application.initialize()
-        await application.start()
-        await application.start_polling()
-        logging.info("Bot avviato correttamente. In ascolto...")
-        # Mantieni lo script in esecuzione per sempre
-        while True:
-            await asyncio.sleep(3600)
-    except (KeyboardInterrupt, SystemExit):
-        logging.info("Bot in fase di spegnimento...")
-        await application.stop_polling()
-        await application.stop()
-        logging.info("Bot spento correttamente.")
-    except Exception as e:
-        logging.error(f"Errore imprevisto: {e}")
-        await application.stop_polling()
-        await application.stop()
+    # Questo singolo comando avvia il bot in modalità polling e lo tiene attivo
+    await application.run_polling()
 
 if __name__ == "__main__":
     asyncio.run(main())
