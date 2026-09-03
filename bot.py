@@ -15,7 +15,17 @@ from telegram.ext import (
 # --- CONFIGURAZIONE ---
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
 TOKEN = "8386637281:AAHB06Ex-vLau4dqU2znuBo3EWp01Smzqq4"
-ATTESA_FOTO, CONFERMA_RESET = range(2)
+ATTESA_FOTO, SELEZIONE_RESET, CONFERMA_RESET = range(3)
+
+VOCI_RESET = {
+    "vittorie": "✅ Vittorie",
+    "sconfitte": "❌ Sconfitte",
+    "pareggi": "🤝 Pareggi",
+    "gol_fatti": "⚽️ Gol fatti",
+    "gol_subiti": "🥅 Gol subiti",
+    "partite_giocate": "🎮 Partite giocate",
+    "punti": "🏆 Punti",
+}
 
 # --- FUNZIONI DI GESTIONE FILE ---
 def carica_utenti():
@@ -68,21 +78,166 @@ async def deluser(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     salva_utenti(utenti)
     await update.message.reply_text(f"🗑️ Utente `{utente_da_rimuovere}` rimosso con successo.")
 
+def crea_tastiera_reset(selezionate):
+    """Crea la tastiera mostrando con una spunta le voci selezionate."""
+    pulsanti_voci = []
+    for chiave, etichetta in VOCI_RESET.items():
+        stato = "☑️" if chiave in selezionate else "⬜"
+        pulsanti_voci.append(
+            InlineKeyboardButton(
+                f"{stato} {etichetta}",
+                callback_data=f"reset_toggle:{chiave}",
+            )
+        )
+
+    keyboard = [
+        pulsanti_voci[0:2],
+        pulsanti_voci[2:4],
+        pulsanti_voci[4:6],
+        pulsanti_voci[6:7],
+        [
+            InlineKeyboardButton("☑️ Seleziona tutto", callback_data="reset_select_all"),
+            InlineKeyboardButton("⬜ Deseleziona tutto", callback_data="reset_select_none"),
+        ],
+        [InlineKeyboardButton("➡️ Continua", callback_data="reset_continue")],
+        [InlineKeyboardButton("❌ Annulla", callback_data="reset_cancel")],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
 async def reset_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    keyboard = [[InlineKeyboardButton("✅ SÌ, RESETTA TUTTO", callback_data='reset_confirm'), InlineKeyboardButton("❌ NO, ANNULLA", callback_data='reset_cancel')]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("‼️ *ATTENZIONE* ‼️\n\nSei sicuro di voler cancellare TUTTE le statistiche? L'operazione è *irreversibile*.", reply_markup=reply_markup, parse_mode='Markdown')
+    context.user_data["reset_selection"] = []
+    await update.message.reply_text(
+        "♻️ *Reset statistiche*\n\n"
+        "Seleziona le voci che vuoi azzerare. Le altre resteranno invariate.",
+        reply_markup=crea_tastiera_reset(set()),
+        parse_mode="Markdown",
+    )
+    return SELEZIONE_RESET
+
+
+async def reset_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+
+    voce = query.data.split(":", 1)[1]
+    if voce not in VOCI_RESET:
+        return SELEZIONE_RESET
+
+    selezionate = set(context.user_data.get("reset_selection", []))
+    if voce in selezionate:
+        selezionate.remove(voce)
+    else:
+        selezionate.add(voce)
+
+    context.user_data["reset_selection"] = list(selezionate)
+    await query.edit_message_reply_markup(
+        reply_markup=crea_tastiera_reset(selezionate)
+    )
+    return SELEZIONE_RESET
+
+
+async def reset_select_all(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+
+    selezionate = set(VOCI_RESET)
+    context.user_data["reset_selection"] = list(selezionate)
+    await query.edit_message_reply_markup(
+        reply_markup=crea_tastiera_reset(selezionate)
+    )
+    return SELEZIONE_RESET
+
+
+async def reset_select_none(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+
+    context.user_data["reset_selection"] = []
+    await query.edit_message_reply_markup(
+        reply_markup=crea_tastiera_reset(set())
+    )
+    return SELEZIONE_RESET
+
+
+async def reset_riepilogo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    selezionate = set(context.user_data.get("reset_selection", []))
+
+    if not selezionate:
+        await query.answer("Seleziona almeno una voce da resettare.", show_alert=True)
+        return SELEZIONE_RESET
+
+    await query.answer()
+    elenco = "\n".join(
+        f"• {etichetta}"
+        for chiave, etichetta in VOCI_RESET.items()
+        if chiave in selezionate
+    )
+    keyboard = [
+        [InlineKeyboardButton("✅ Conferma reset", callback_data="reset_confirm")],
+        [InlineKeyboardButton("⬅️ Modifica selezione", callback_data="reset_back")],
+        [InlineKeyboardButton("❌ Annulla", callback_data="reset_cancel")],
+    ]
+    await query.edit_message_text(
+        "‼️ *Conferma reset* ‼️\n\n"
+        "Verranno azzerate queste voci per tutti gli utenti:\n\n"
+        f"{elenco}\n\n"
+        "Tutte le altre statistiche resteranno invariate. "
+        "L'operazione è *irreversibile*.",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode="Markdown",
+    )
     return CONFERMA_RESET
 
+
+async def reset_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    selezionate = set(context.user_data.get("reset_selection", []))
+    await query.edit_message_text(
+        "♻️ *Reset statistiche*\n\n"
+        "Seleziona le voci che vuoi azzerare. Le altre resteranno invariate.",
+        reply_markup=crea_tastiera_reset(selezionate),
+        parse_mode="Markdown",
+    )
+    return SELEZIONE_RESET
+
 async def reset_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    query = update.callback_query; await query.answer()
-    utenti = carica_utenti()
-    statistiche = {n: {"vittorie": 0, "sconfitte": 0, "pareggi": 0, "gol_fatti": 0, "gol_subiti": 0, "partite_giocate": 0, "punti": 0} for n in utenti}
-    salva_dati({"statistiche": statistiche})
-    await query.edit_message_text(" resettato con successo."); return ConversationHandler.END
+    query = update.callback_query
+    await query.answer()
+    selezionate = set(context.user_data.pop("reset_selection", []))
+
+    if not selezionate:
+        await query.edit_message_text("⚠️ Nessuna voce selezionata. Nessun dato è stato modificato.")
+        return ConversationHandler.END
+
+    dati = carica_dati()
+    utenti_attivi = set(carica_utenti())
+    for nome, statistiche in dati.get("statistiche", {}).items():
+        if nome not in utenti_attivi:
+            continue
+        for voce in selezionate:
+            statistiche[voce] = 0
+
+    salva_dati(dati)
+    elenco = ", ".join(
+        etichetta
+        for chiave, etichetta in VOCI_RESET.items()
+        if chiave in selezionate
+    )
+    await query.edit_message_text(f"✅ Reset completato: {elenco}.")
+    return ConversationHandler.END
 
 async def reset_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    query = update.callback_query; await query.answer(); await query.edit_message_text("Operazione annullata."); return ConversationHandler.END
+    context.user_data.pop("reset_selection", None)
+    if update.callback_query:
+        query = update.callback_query
+        await query.answer()
+        await query.edit_message_text("Operazione annullata.")
+    else:
+        await update.message.reply_text("Operazione annullata.")
+    return ConversationHandler.END
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text('Ciao! Sono il bot per le amichevoli. Usa /partita o /classifica.')
@@ -152,10 +307,20 @@ def main() -> None:
     )
     conv_reset = ConversationHandler(
         entry_points=[CommandHandler('reset', reset_start)],
-        states={CONFERMA_RESET: [
-            CallbackQueryHandler(reset_confirm, pattern='^reset_confirm$'),
-            CallbackQueryHandler(reset_cancel, pattern='^reset_cancel$'),
-        ]},
+        states={
+            SELEZIONE_RESET: [
+                CallbackQueryHandler(reset_toggle, pattern=r'^reset_toggle:'),
+                CallbackQueryHandler(reset_select_all, pattern=r'^reset_select_all$'),
+                CallbackQueryHandler(reset_select_none, pattern=r'^reset_select_none$'),
+                CallbackQueryHandler(reset_riepilogo, pattern=r'^reset_continue$'),
+                CallbackQueryHandler(reset_cancel, pattern=r'^reset_cancel$'),
+            ],
+            CONFERMA_RESET: [
+                CallbackQueryHandler(reset_confirm, pattern=r'^reset_confirm$'),
+                CallbackQueryHandler(reset_back, pattern=r'^reset_back$'),
+                CallbackQueryHandler(reset_cancel, pattern=r'^reset_cancel$'),
+            ],
+        },
         fallbacks=[CommandHandler('annulla', reset_cancel)],
     )
     application.add_handler(conv_partita)
