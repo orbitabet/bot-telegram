@@ -20,6 +20,7 @@ from telegram.ext import (
 
 # --- CONFIGURAZIONE ---
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
+logging.getLogger("httpx").setLevel(logging.WARNING)
 TOKEN = os.environ["BOT_TOKEN"]
 (
     ATTESA_FOTO,
